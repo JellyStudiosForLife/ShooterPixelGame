@@ -1,0 +1,235 @@
+
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mein 3D Shooter</title>
+<style>
+  body { margin:0; overflow:hidden; font-family:Arial,sans-serif; background:#111; }
+  #menu {
+    position:fixed; inset:0; display:flex; flex-direction:column;
+    justify-content:center; align-items:center; color:white;
+    background:linear-gradient(#101b2ddd,#111a);
+    z-index:5;
+  }
+  h1 { font-size:52px; text-shadow:0 0 20px #38aaff; }
+  button {
+    padding:17px 45px; font-size:22px; cursor:pointer;
+    background:#1688dd; color:white; border:0; border-radius:8px;
+  }
+  #hud {
+    display:none; position:fixed; inset:0; pointer-events:none;
+    color:white; text-shadow:1px 1px 3px black;
+  }
+  #info { position:absolute; top:15px; left:15px; }
+  #crosshair {
+    position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+    font-size:28px;
+  }
+  #weapon {
+    position:absolute; right:8%; bottom:7%; font-size:65px;
+    transform:rotate(-20deg);
+  }
+  #hint { position:absolute; bottom:15px; left:50%; transform:translateX(-50%); }
+  #flash {
+    position:absolute; left:50%; top:50%; font-size:50px;
+    transform:translate(-50%,-100%); display:none;
+  }
+</style>
+</head>
+<body>
+
+<div id="menu">
+  <h1>3D SHOOTER</h1>
+  <p>Dein Abenteuer beginnt!</p>
+  <button id="start">NEW GAME</button>
+</div>
+
+<div id="hud">
+  <div id="info">Ausrüstung: Pistole</div>
+  <div id="crosshair">+</div>
+  <div id="weapon">🔫</div>
+  <div id="flash">✦</div>
+  <div id="hint">WASD: Bewegen · Maus: Umschauen · Leertaste: Springen · Klick: Schusseffekt · ESC: Pause</div>
+</div>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+let scene, camera, renderer, player;
+let yaw = 0, pitch = 0;
+let keys = {};
+let velocityY = 0;
+let grounded = true;
+let playing = false;
+let lastShot = 0;
+
+const menu = document.getElementById('menu');
+const hud = document.getElementById('hud');
+
+function createWorld() {
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x87bde8);
+  scene.fog = new THREE.Fog(0x87bde8, 35, 110);
+
+  camera = new THREE.PerspectiveCamera(
+    75, innerWidth / innerHeight, 0.1, 200
+  );
+  camera.position.set(0, 1.7, 0);
+
+  renderer = new THREE.WebGLRenderer({ antialias:true });
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  document.body.appendChild(renderer.domElement);
+
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x526044, 2));
+  const sun = new THREE.DirectionalLight(0xffffff, 2);
+  sun.position.set(20, 40, 10);
+  scene.add(sun);
+
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(220, 220),
+    new THREE.MeshStandardMaterial({ color:0x477b3c })
+  );
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.y = -0.1;
+  scene.add(ground);
+
+  // Zufällige Welt
+  for (let i = 0; i < 100; i++) {
+    const x = (Math.random() - 0.5) * 180;
+    const z = (Math.random() - 0.5) * 180;
+    if (Math.abs(x) < 8 && Math.abs(z) < 8) continue;
+
+    const tree = new THREE.Group();
+
+    const trunk = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.25, 0.35, 2.2, 7),
+      new THREE.MeshStandardMaterial({color:0x76502d})
+    );
+    trunk.position.y = 1.1;
+    tree.add(trunk);
+
+    const leaves = new THREE.Mesh(
+      new THREE.ConeGeometry(1.5, 3.5, 7),
+      new THREE.MeshStandardMaterial({color:0x176b32})
+    );
+    leaves.position.y = 3.1;
+    tree.add(leaves);
+
+    tree.position.set(x, 0, z);
+    scene.add(tree);
+  }
+
+  // Felsen
+  for (let i = 0; i < 35; i++) {
+    const rock = new THREE.Mesh(
+      new THREE.DodecahedronGeometry(0.8 + Math.random()),
+      new THREE.MeshStandardMaterial({color:0x777777})
+    );
+    rock.position.set(
+      (Math.random() - 0.5) * 150,
+      0.5,
+      (Math.random() - 0.5) * 150
+    );
+    scene.add(rock);
+  }
+
+  player = new THREE.Object3D();
+  player.position.set(0, 0, 0);
+  scene.add(player);
+  player.add(camera);
+}
+
+function startGame() {
+  if (!renderer) createWorld();
+
+  playing = true;
+  menu.style.display = 'none';
+  hud.style.display = 'block';
+
+  renderer.domElement.requestPointerLock();
+  animate();
+}
+
+document.getElementById('start').addEventListener('click', startGame);
+
+document.addEventListener('pointerlockchange', () => {
+  if (!document.pointerLockElement && playing) {
+    playing = false;
+    menu.style.display = 'flex';
+    hud.style.display = 'none';
+    document.querySelector('#menu h1').textContent = 'PAUSE';
+    document.getElementById('start').textContent = 'WEITER SPIELEN';
+  }
+});
+
+document.addEventListener('mousemove', e => {
+  if (!playing || document.pointerLockElement !== renderer?.domElement) return;
+  yaw -= e.movementX * 0.002;
+  pitch -= e.movementY * 0.002;
+  pitch = Math.max(-1.4, Math.min(1.4, pitch));
+  player.rotation.y = yaw;
+  camera.rotation.x = pitch;
+});
+
+document.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'Space') e.preventDefault();
+});
+document.addEventListener('keyup', e => keys[e.code] = false);
+
+document.addEventListener('mousedown', () => {
+  if (!playing || document.pointerLockElement !== renderer?.domElement) return;
+  const now = performance.now();
+  if (now - lastShot < 250) return;
+  lastShot = now;
+
+  const flash = document.getElementById('flash');
+  flash.style.display = 'block';
+  setTimeout(() => flash.style.display = 'none', 90);
+});
+
+function animate() {
+  if (!playing) return;
+  requestAnimationFrame(animate);
+
+  const speed = 0.12;
+  const forward = new THREE.Vector3(
+    -Math.sin(yaw), 0, -Math.cos(yaw)
+  );
+  const right = new THREE.Vector3(
+    Math.cos(yaw), 0, -Math.sin(yaw)
+  );
+
+  if (keys.KeyW) player.position.addScaledVector(forward, speed);
+  if (keys.KeyS) player.position.addScaledVector(forward, -speed);
+  if (keys.KeyA) player.position.addScaledVector(right, -speed);
+  if (keys.KeyD) player.position.addScaledVector(right, speed);
+
+  if (keys.Space && grounded) {
+    velocityY = 0.18;
+    grounded = false;
+  }
+
+  velocityY -= 0.008;
+  player.position.y += velocityY;
+  if (player.position.y < 0) {
+    player.position.y = 0;
+    velocityY = 0;
+    grounded = true;
+  }
+
+  renderer.render(scene, camera);
+}
+
+addEventListener('resize', () => {
+  if (!camera || !renderer) return;
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
